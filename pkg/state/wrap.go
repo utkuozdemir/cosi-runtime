@@ -52,8 +52,6 @@ func (state coreWrapper) UpdateWithConflicts(ctx context.Context, resourcePointe
 			return current, nil
 		}
 
-		newResource.Metadata().BumpVersion()
-
 		err = state.Update(ctx, curVersion, newResource, opts...)
 		if err == nil {
 			return current, nil

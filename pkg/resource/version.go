@@ -26,6 +26,18 @@ var (
 
 const undefinedVersion = "undefined"
 
+// Value returns the underlying version number. Returns 0 if the version is undefined.
+func (v Version) Value() uint64 {
+	return pointer.SafeDeref(v.uint64)
+}
+
+// Next returns a new incremented version.
+func (v Version) Next() Version {
+	return Version{
+		uint64: pointer.To(pointer.SafeDeref(v.uint64) + 1),
+	}
+}
+
 func (v Version) String() string {
 	if v.uint64 == nil {
 		return undefinedVersion
@@ -57,4 +69,11 @@ func ParseVersion(ver string) (Version, error) {
 	return Version{
 		uint64: pointer.To(uint64(intVersion)),
 	}, nil
+}
+
+// NewVersion returns a new version for the given version number.
+func NewVersion(ver uint64) Version {
+	return Version{
+		uint64: pointer.To(ver),
+	}
 }

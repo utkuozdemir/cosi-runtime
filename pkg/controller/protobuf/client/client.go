@@ -599,8 +599,6 @@ func (ctrlAdapter *controllerAdapter) Modify(ctx context.Context, emptyResource 
 			return nil
 		}
 
-		newResource.Metadata().BumpVersion()
-
 		err = ctrlAdapter.Update(ctx, curVersion, newResource)
 		if err == nil {
 			return nil

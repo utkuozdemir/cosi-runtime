@@ -8,6 +8,7 @@ import (
 	"context"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/cosi-project/runtime/pkg/resource"
 	"github.com/cosi-project/runtime/pkg/state"
@@ -106,27 +107,29 @@ func (collection *ResourceCollection) inject(resource resource.Resource) {
 }
 
 // Create a resource.
-func (collection *ResourceCollection) Create(ctx context.Context, resource resource.Resource, owner string) error {
-	resource = resource.DeepCopy()
+func (collection *ResourceCollection) Create(ctx context.Context, res resource.Resource, owner string) error {
+	res = res.DeepCopy()
 
-	if err := resource.Metadata().SetOwner(owner); err != nil {
+	if err := res.Metadata().SetOwner(owner); err != nil {
 		return err
 	}
 
 	collection.mu.Lock()
 	defer collection.mu.Unlock()
 
-	if _, exists := collection.storage[resource.Metadata().ID()]; exists {
-		return ErrAlreadyExists(resource.Metadata())
+	if _, exists := collection.storage[res.Metadata().ID()]; exists {
+		return ErrAlreadyExists(res.Metadata())
 	}
 
+	res.Metadata().SetVersion(resource.NewVersion(1))
+
 	if collection.store != nil {
-		if err := collection.store.Put(ctx, collection.typ, resource); err != nil {
+		if err := collection.store.Put(ctx, collection.typ, res); err != nil {
 			return err
 		}
 	}
 
-	collection.inject(resource)
+	collection.inject(res)
 
 	return nil
 }
@@ -148,10 +151,6 @@ func (collection *ResourceCollection) Update(ctx context.Context, curVersion res
 		return ErrOwnerConflict(curResource.Metadata(), curResource.Metadata().Owner())
 	}
 
-	if newResource.Metadata().Version().Equal(curVersion) {
-		return ErrUpdateSameVersion(curResource.Metadata(), curVersion)
-	}
-
 	if !curResource.Metadata().Version().Equal(curVersion) {
 		return ErrVersionConflict(curResource.Metadata(), curVersion, curResource.Metadata().Version())
 	}
@@ -159,6 +158,9 @@ func (collection *ResourceCollection) Update(ctx context.Context, curVersion res
 	if options.ExpectedPhase != nil && curResource.Metadata().Phase() != *options.ExpectedPhase {
 		return ErrPhaseConflict(curResource.Metadata(), *options.ExpectedPhase)
 	}
+
+	newResource.Metadata().SetVersion(curVersion.Next())
+	newResource.Metadata().SetUpdated(time.Now())
 
 	if collection.store != nil {
 		if err := collection.store.Put(ctx, collection.typ, newResource); err != nil {
