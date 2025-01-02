@@ -6,7 +6,9 @@ package resource
 
 import (
 	"fmt"
+	"log"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/siderolabs/gen/xslices"
@@ -147,7 +149,17 @@ func (md Metadata) String() string {
 }
 
 // Equal tests two metadata objects for equality.
-func (md Metadata) Equal(other Metadata) bool {
+func (md Metadata) Equal(other Metadata) (retval bool) {
+	logg := func(format string, v ...any) {
+		if strings.Contains(md.typ, "InfraMachines") {
+			log.Printf(format, v...)
+		}
+	}
+
+	defer func() {
+		logg("#### 0000: %v", retval)
+	}()
+
 	equal := md.ns == other.ns &&
 		md.typ == other.typ &&
 		md.id == other.id &&
@@ -155,31 +167,44 @@ func (md Metadata) Equal(other Metadata) bool {
 		md.owner == other.owner &&
 		md.ver.Equal(other.ver)
 	if !equal {
+		logg("#### 1111")
+
 		return false
 	}
 
 	if !md.labels.Equal(other.labels) {
+		logg("#### 2222")
+
 		return false
 	}
 
 	if !md.annotations.Equal(other.annotations) {
+		logg("#### 3333")
+
 		return false
 	}
 
 	if len(md.fins) != len(other.fins) {
+		logg("#### 4444")
+
 		return false
 	}
 
 	if md.fins == nil && other.fins == nil {
+		logg("#### 5555")
+
 		return true
 	}
 
 	switch len(md.fins) {
 	case 0:
+		logg("#### 6666")
 		return true
 	case 1:
+		logg("#### 7777")
 		return md.fins[0] == other.fins[0]
 	case 2:
+		logg("#### 8888")
 		return md.fins[0] == other.fins[0] && md.fins[1] == other.fins[1] ||
 			md.fins[0] == other.fins[1] && md.fins[1] == other.fins[0]
 	default:
@@ -188,6 +213,8 @@ func (md Metadata) Equal(other Metadata) bool {
 
 		slices.Sort(fins)
 		slices.Sort(otherFins)
+
+		logg("#### 9999")
 
 		return slices.Equal(fins, otherFins)
 	}
