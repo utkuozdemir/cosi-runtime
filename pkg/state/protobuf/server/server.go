@@ -7,6 +7,7 @@ package server
 
 import (
 	"context"
+	"log"
 
 	"github.com/siderolabs/go-pointer"
 	"google.golang.org/grpc/codes"
@@ -264,6 +265,8 @@ func (server *State) Watch(req *v1alpha1.WatchRequest, srv v1alpha1.State_WatchS
 	var err error
 
 	if req.Id == nil {
+		log.Printf("SERVER WATCHKIND FOR %s/%s, bootstrapbookmark: %v", req.Namespace, req.Type, req.Options.BootstrapBookmark)
+
 		var opts []state.WatchKindOption
 
 		if req.Options.BootstrapContents {
@@ -305,8 +308,12 @@ func (server *State) Watch(req *v1alpha1.WatchRequest, srv v1alpha1.State_WatchS
 		}
 
 		if req.Options.Aggregated {
+			log.Printf("SERVER WATCHKINDAGGREGATED FOR %s/%s, bootstrapbookmark: %v", req.Namespace, req.Type, req.Options.BootstrapBookmark)
+
 			err = server.state.WatchKindAggregated(ctx, resource.NewMetadata(req.Namespace, req.Type, "", resource.VersionUndefined), aggregatedCh, opts...)
 		} else {
+			log.Printf("SERVER WATCHKIND2 FOR %s/%s, bootstrapbookmark: %v", req.Namespace, req.Type, req.Options.BootstrapBookmark)
+
 			err = server.state.WatchKind(ctx, resource.NewMetadata(req.Namespace, req.Type, "", resource.VersionUndefined), singleCh, opts...)
 		}
 	} else {

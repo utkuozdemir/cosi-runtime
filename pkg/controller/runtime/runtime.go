@@ -8,6 +8,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 
 	"github.com/siderolabs/gen/channel"
@@ -233,6 +234,8 @@ func (runtime *Runtime) setupWatches() error {
 	for key, cached := range runtime.watched {
 		kind := resource.NewMetadata(key.Namespace, key.Type, "", resource.Version{})
 
+		log.Printf("START EARLY WATCH: %s/%s (cached: %t)", key.Namespace, key.Type, cached)
+
 		if err := runtime.state.WatchKindAggregated(runtime.runCtx, kind, runtime.watchCh, state.WithBootstrapContents(cached), state.WithBootstrapBookmark(!cached)); err != nil {
 			return err
 		}
@@ -263,7 +266,9 @@ func (runtime *Runtime) watch(resourceNamespace resource.Namespace, resourceType
 
 	kind := resource.NewMetadata(resourceNamespace, resourceType, "", resource.Version{})
 
-	return runtime.state.WatchKindAggregated(runtime.runCtx, kind, runtime.watchCh)
+	log.Printf("START LATE WATCH: %s/%s", resourceNamespace, resourceType)
+
+	return runtime.state.WatchKindAggregated(runtime.runCtx, kind, runtime.watchCh, state.WithBootstrapBookmark(true))
 }
 
 type dedup map[reduced.Metadata]struct{}
@@ -310,6 +315,8 @@ eventLoop:
 		if e.Type == state.Errored {
 			// watch failed, we need to abort
 			runtime.watchErrors <- e.Error
+
+			log.Printf("GAME OVER: watch failed: %v", e.Error)
 
 			return false
 		}

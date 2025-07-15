@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
@@ -474,6 +475,7 @@ func (adapter *Adapter) watchAdapter(
 	sendError := func(err error) {
 		switch {
 		case singleCh != nil:
+			log.Printf("SEND ERROR to single channel: %v", err)
 			channel.SendWithContext(ctx, singleCh,
 				state.Event{
 					Type:  state.Errored,
@@ -481,6 +483,7 @@ func (adapter *Adapter) watchAdapter(
 				},
 			)
 		case aggregatedCh != nil:
+			log.Printf("SEND ERROR to aggregated channel: %v", err)
 			channel.SendWithContext(ctx, aggregatedCh, []state.Event{
 				{
 					Type:  state.Errored,
@@ -495,7 +498,14 @@ func (adapter *Adapter) watchAdapter(
 
 	var lastBookmark []byte
 
-	recvMessage := func() (*v1alpha1.WatchResponse, error) {
+	recvMessage := func() (vvv *v1alpha1.WatchResponse, eee error) {
+		defer func() {
+			log.Printf("RECEIVED MESSAGE: %s/%s: %v", watchRequest.Namespace, watchRequest.Type, eee)
+			for _, eeee := range vvv.Event {
+				log.Printf("EVENT: %s/%s TYPE: %s BOOKMARK: %s", watchRequest.Namespace, watchRequest.Type, eeee.EventType.String(), string(eeee.Bookmark))
+			}
+		}()
+
 		msg, err := cli.Recv()
 		if err == nil {
 			return msg, nil
@@ -507,6 +517,8 @@ func (adapter *Adapter) watchAdapter(
 		}
 
 		if lastBookmark == nil {
+			log.Printf("FAILED AND LAST BOOKMARK IS NIL: %s/%s: %v", watchRequest.Namespace, watchRequest.Type, err)
+
 			return nil, err
 		}
 
@@ -570,6 +582,8 @@ func (adapter *Adapter) watchAdapter(
 	for {
 		msg, err := recvMessage()
 		if err != nil {
+			log.Printf("FAILED TO RECEIVE MESSAGE: %v", err)
+
 			sendError(err)
 
 			return
@@ -578,6 +592,7 @@ func (adapter *Adapter) watchAdapter(
 		events := make([]state.Event, 0, len(msg.Event))
 
 		for _, msgEvent := range msg.Event {
+			log.Printf("EVENT RECEIVED FOR %s/%s TYPE: %s BOOKMARK: %s: %v", watchRequest.Namespace, watchRequest.Type, msgEvent.EventType, msgEvent.Bookmark, msgEvent)
 			lastBookmark = msgEvent.Bookmark // keep the last seen bookmark, even if it's nil
 
 			event := state.Event{
