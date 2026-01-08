@@ -10,6 +10,7 @@ type StateOptions struct {
 	HistoryMaxCapacity     int
 	HistoryInitialCapacity int
 	HistoryGap             int
+	EventSendJitterMS      int
 }
 
 // StateOption applies settings to StateOptions.
@@ -75,6 +76,12 @@ func WithHistoryGap(gap int) StateOption {
 func WithBackingStore(store BackingStore) StateOption {
 	return func(options *StateOptions) {
 		options.BackingStore = store
+	}
+}
+
+func WithEventSendJitter(maxJitterMS int) StateOption {
+	return func(options *StateOptions) {
+		options.EventSendJitterMS = maxJitterMS
 	}
 }
 

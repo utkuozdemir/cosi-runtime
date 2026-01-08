@@ -29,6 +29,8 @@ type State struct {
 	loaded  atomic.Bool
 
 	initialCapacity, maxCapacity, gap int
+
+	eventSendJitterMS int
 }
 
 // NewState creates new State with default options.
@@ -44,12 +46,13 @@ func NewStateWithOptions(opts ...StateOption) func(ns resource.Namespace) *State
 
 	return func(ns resource.Namespace) *State {
 		return &State{
-			collections:     concurrent.NewHashTrieMap[resource.Type, *ResourceCollection](),
-			store:           options.BackingStore,
-			ns:              ns,
-			initialCapacity: options.HistoryInitialCapacity,
-			maxCapacity:     options.HistoryMaxCapacity,
-			gap:             options.HistoryGap,
+			collections:       concurrent.NewHashTrieMap[resource.Type, *ResourceCollection](),
+			store:             options.BackingStore,
+			ns:                ns,
+			initialCapacity:   options.HistoryInitialCapacity,
+			maxCapacity:       options.HistoryMaxCapacity,
+			gap:               options.HistoryGap,
+			eventSendJitterMS: options.EventSendJitterMS,
 		}
 	}
 }
@@ -59,7 +62,7 @@ func (st *State) getCollection(typ resource.Type) *ResourceCollection {
 		return r
 	}
 
-	collection := NewResourceCollection(st.ns, typ, st.initialCapacity, st.maxCapacity, st.gap, st.store)
+	collection := NewResourceCollection(st.ns, typ, st.initialCapacity, st.maxCapacity, st.gap, st.store, st.eventSendJitterMS)
 
 	r, _ := st.collections.LoadOrStore(typ, collection)
 

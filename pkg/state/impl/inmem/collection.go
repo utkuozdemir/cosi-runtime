@@ -10,6 +10,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	mathrand "math/rand/v2"
 	"slices"
 	"sort"
 	"sync"
@@ -39,22 +40,24 @@ type ResourceCollection struct {
 
 	writePos int64
 
-	capacity    int
-	maxCapacity int
-	gap         int
+	capacity          int
+	maxCapacity       int
+	gap               int
+	eventSendJitterMS int
 }
 
 // NewResourceCollection returns new ResourceCollection.
-func NewResourceCollection(ns resource.Namespace, typ resource.Type, initialCapacity, maxCapacity, gap int, store BackingStore) *ResourceCollection {
+func NewResourceCollection(ns resource.Namespace, typ resource.Type, initialCapacity, maxCapacity, gap int, store BackingStore, eventSendJitterMS int) *ResourceCollection {
 	collection := &ResourceCollection{
-		ns:          ns,
-		typ:         typ,
-		capacity:    initialCapacity,
-		maxCapacity: maxCapacity,
-		gap:         gap,
-		storage:     map[resource.ID]resource.Resource{},
-		stream:      make([]state.Event, initialCapacity),
-		store:       store,
+		ns:                ns,
+		typ:               typ,
+		capacity:          initialCapacity,
+		maxCapacity:       maxCapacity,
+		gap:               gap,
+		storage:           map[resource.ID]resource.Resource{},
+		stream:            make([]state.Event, initialCapacity),
+		store:             store,
+		eventSendJitterMS: eventSendJitterMS,
 	}
 
 	collection.c = sync.NewCond(&collection.mu)
@@ -369,7 +372,7 @@ func (collection *ResourceCollection) Watch(ctx context.Context, id resource.ID,
 
 	go func() {
 		if options.TailEvents <= 0 && options.StartFromBookmark == nil {
-			if !channel.SendWithContext(ctx, ch, initialEvent) {
+			if !sendWithContext(ctx, ch, initialEvent, collection.eventSendJitterMS) {
 				return
 			}
 		}
@@ -403,14 +406,14 @@ func (collection *ResourceCollection) Watch(ctx context.Context, id resource.ID,
 
 				collection.mu.Unlock()
 
-				channel.SendWithContext(ctx, ch,
+				sendWithContext(ctx, ch,
 					state.Event{
 						Type: state.Errored,
 						Error: fmt.Errorf(
 							"buffer overrun: namespace %q type %q, write pos %d, pos %d, capacity %d",
 							collection.ns, collection.typ, collectionWritePos, pos, collectionCapacity,
 						),
-					},
+					}, collection.eventSendJitterMS,
 				)
 
 				return
@@ -434,7 +437,7 @@ func (collection *ResourceCollection) Watch(ctx context.Context, id resource.ID,
 			}
 
 			// deliver event
-			if !channel.SendWithContext(ctx, ch, event) {
+			if !sendWithContext(ctx, ch, event, collection.eventSendJitterMS) {
 				return
 			}
 		}
@@ -525,23 +528,23 @@ func (collection *ResourceCollection) WatchAll(ctx context.Context, singleCh cha
 			switch {
 			case singleCh != nil:
 				for _, res := range bootstrapList {
-					if !channel.SendWithContext(ctx, singleCh,
+					if !sendWithContext(ctx, singleCh,
 						state.Event{
 							Type:     state.Created,
 							Resource: res,
-						},
+						}, collection.eventSendJitterMS,
 					) {
 						return
 					}
 				}
 
-				if !channel.SendWithContext(
+				if !sendWithContext(
 					ctx, singleCh,
 					state.Event{
 						Type:     state.Bootstrapped,
 						Resource: resource.NewTombstone(resource.NewMetadata(collection.ns, collection.typ, "", resource.VersionUndefined)),
 						Bookmark: encodeBookmark(pos - 1),
-					},
+					}, collection.eventSendJitterMS,
 				) {
 					return
 				}
@@ -559,7 +562,7 @@ func (collection *ResourceCollection) WatchAll(ctx context.Context, singleCh cha
 					Bookmark: encodeBookmark(pos - 1),
 				})
 
-				if !channel.SendWithContext(ctx, aggCh, events) {
+				if !sendWithContext(ctx, aggCh, events, collection.eventSendJitterMS) {
 					return
 				}
 			}
@@ -578,11 +581,11 @@ func (collection *ResourceCollection) WatchAll(ctx context.Context, singleCh cha
 
 			switch {
 			case singleCh != nil:
-				if !channel.SendWithContext(ctx, singleCh, event) {
+				if !sendWithContext(ctx, singleCh, event, collection.eventSendJitterMS) {
 					return
 				}
 			case aggCh != nil:
-				if !channel.SendWithContext(ctx, aggCh, []state.Event{event}) {
+				if !sendWithContext(ctx, aggCh, []state.Event{event}, collection.eventSendJitterMS) {
 					return
 				}
 			}
@@ -627,9 +630,9 @@ func (collection *ResourceCollection) WatchAll(ctx context.Context, singleCh cha
 
 				switch {
 				case singleCh != nil:
-					channel.SendWithContext(ctx, singleCh, overrunEvent)
+					sendWithContext(ctx, singleCh, overrunEvent, collection.eventSendJitterMS)
 				case aggCh != nil:
-					channel.SendWithContext(ctx, aggCh, []state.Event{overrunEvent})
+					sendWithContext(ctx, aggCh, []state.Event{overrunEvent}, collection.eventSendJitterMS)
 				}
 
 				return
@@ -690,12 +693,12 @@ func (collection *ResourceCollection) WatchAll(ctx context.Context, singleCh cha
 
 			switch {
 			case aggCh != nil:
-				if !channel.SendWithContext(ctx, aggCh, events) {
+				if !sendWithContext(ctx, aggCh, events, collection.eventSendJitterMS) {
 					return
 				}
 			case singleCh != nil:
 				for _, event := range events {
-					if !channel.SendWithContext(ctx, singleCh, event) {
+					if !sendWithContext(ctx, singleCh, event, collection.eventSendJitterMS) {
 						return
 					}
 				}
@@ -721,4 +724,28 @@ func filterInPlaceMutating[S ~[]V, V any](slc S, fn func(*V) bool) S {
 	}
 
 	return r
+}
+
+func sendWithContext[T any](ctx context.Context, ch chan<- T, val T, eventSendJitterMS int) bool {
+	if eventSendJitterMS > 0 {
+		jitter := time.Duration(mathrand.IntN(eventSendJitterMS)) * time.Millisecond
+		if !sleepWithContext(ctx, jitter) {
+			return false
+		}
+	}
+
+	return channel.SendWithContext(ctx, ch, val)
+}
+
+func sleepWithContext(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+	}
+
+	return true
 }
